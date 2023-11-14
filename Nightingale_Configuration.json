@@ -1,0 +1,41 @@
+{
+    "instrument_name": "Nightingale_Spectrometer",
+    "wavenumber_range": {
+      "min": 100,
+      "max": 1100,
+      "unit": "cm^-1"
+    },
+    "spectral_resolution": 0.1, 
+    "field_of_view": {
+        "shape": "square",
+        "horizontal": 1,
+        "vertical": 1,
+        "unit": "degrees"
+    },
+    "spacecraft_state": {
+      "position": {
+        "latitude": -90.0,
+        "longitude": 145.0,
+        "altitude": 147000.0,
+        "unit": "degrees and m"
+      },
+      "pointing": {
+        "azimuth": 0.0,
+        "elevation": 0.0,
+        "roll": 0.0,
+        "unit": "degrees"
+      }
+    },
+    "bandpasses": [
+      {"lower": 7.0, "upper": 15.0, "width_in_pixels": 16},
+      {"lower": 15.0, "upper": 25.0, "width_in_pixels": 16},
+      {"lower": 25.0, "upper": 50.0, "width_in_pixels": 16},
+      {"lower": 50.0, "upper": 75.0, "width_in_pixels": 16},
+      {"lower": 75.0, "upper": 100.0, "width_in_pixels": 16},
+      {"lower": 100.0, "upper": 150.0, "width_in_pixels": 16},
+      {"lower": 150.0, "upper": 200.0, "width_in_pixels": 16},
+      {"lower": 50.0, "upper": 100.0, "width_in_pixels": 16},
+      {"lower": 100.0, "upper": 200.0, "width_in_pixels": 16}
+  ]  
+}
+
