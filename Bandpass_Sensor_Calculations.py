@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-""" This module is a refactored version of the LTM SNR calculator for the TIRI instrument, originally written by Neil Bowles and adapted by Duncan Lyster in November 2023. The module has been restructured to function as a callable module, allowing it to be integrated with the Thermal Instrument Digital Twin code. The module provides functions to calculate various parameters related to signal-to-noise ratio (SNR) and detector performance for microbolometer arrays. The original code has been significantly modified to improve readability and modularity, while maintaining the core functionality.
+""" This module is a refactored version of the LTM SNR calculator for the TIRI instrument, originally written by Neil Bowles and adapted by Duncan Lyster in November 2023. The module has been restructured to function as a callable module, allowing it to be integrated with the Thermal Instrument Model code. The module provides functions to calculate various parameters related to signal-to-noise ratio (SNR) and detector performance for microbolometer arrays. The original code has been significantly modified to improve readability and modularity, while maintaining the core functionality.
 
 Original: Created on Thu Aug 28 22:02:53 2014 Tweaked for LTM/TIRI/Icy Moons 3/5/22 @author: bowles """
 
@@ -77,38 +77,26 @@ class SNR_data_per_band:
     dBdT_array = [] #This is the derivative of the radiance with respect to temperature
     power_detector_array=[]
     
-def calculate_snr():
+def calculate_snr(wavenumber_min, wavenumber_max, detector_area, telescope_diameter, detector_absorption, det_fnumber, orbital_altitude, target_mass, target_radius):
     """
-    This function calculates the SNR for a given set of parameters.
+    This function calculates the SNR for a given set of parameters. BUG: Cannot currently deal with correct wavenumber input values for ETM. Numbers in main function are chosen to ensure this runs but they are not right. 
     """
 
-    #WAVELENGTH RANGE
-    lambda1 = 1.0E-6                #lower wavelength in m
-    lambda2= 300.0E-6               #upper wavelength in m
+    #Convert the wavenumber range in cm^-1 to a wavelength range in m
+    lambda1 = 1.0E-2 / wavenumber_max
+    lambda2 = 1.0E-2 / wavenumber_min
     
     wavelength_array = np.arange(lambda1, lambda2, 1.0E-9) #Set the wavelength array with 1nm steps.
     
-    #DETECTOR PARAMETERS
-    Dstar = 1E9                     #This is the broadband D*, assumed constant for the detector. In m Hz^1/2 W^-1
-    TDI_pixels = 16                 #Assume 16 pixel TDI average, actual number depends on number of filters.
-    detector_absorption = 0.95      #Sets absorption value for the detector material. This reduces the effective signal level seen by the detector.
-    det_fnumber = 1.4               #f number of the detector
-    detector_area = (35.0E-6)**2    #area of detector element in m (Detector element size, INO = 35x35 µm )
-    telescope_diameter = 0.05       #LTM 5cm telescope  Diviner =4 cm
-
-    #ORBITAL PARAMETERS
-    orbital_altitude = 100.0E3      #Distance to the target body
-    target_mass = 7.34767309E22     #Mass of the target body in kg
-    target_radius = 1737E3          #radius of target body in m
-
     #DERIVED DETECTOR PARAMETERS
-    Half_angle, det_solid_angle, AOmega, total_throughput = calculate_detector_parameters(det_fnumber, detector_area, telescope_diameter, detector_absorption)
+    Half_angle, det_solid_angle, AOmega, total_throughput = calculate_detector_parameters(det_fnumber, 
+    detector_area, telescope_diameter, detector_absorption)
     
     #DERIVED ORBITAL PARAMETERS
     deltaf = deltaf_calc (orbital_altitude, target_mass, target_radius, Half_angle)
 
     #Icy moon Temperatures
-    temperature_array = np.arange(45.0,180.0,10.0)
+    temperature_array = np.arange(45.0,180.0,10.0) #This will have to go somehow when it takes in spectral array from the thermal instrument model. 
     
     #Setup the arrays to hold the results
     snr_array = np.zeros(temperature_array.size)
@@ -134,11 +122,11 @@ def calculate_snr():
     for band_number in tqdm(range(number_of_bands), desc="Calculating SNR for each bandpass"):
         bandpass_array = raw_band_in[band_number]
         
-        lower_index=np.where(wavelength_array>bandpass_array[0]*1E-6)[0][0]
-        upper_index=np.where(wavelength_array>bandpass_array[1]*1E-6)[0][0]
+        lower_index=np.where(wavelength_array>bandpass_array[0]*1E-6)[0][0] #convert the bandpass wavelengths from microns to m and find the index of the first wavelength in the bandpass
+        upper_index=np.where(wavelength_array>bandpass_array[1]*1E-6)[0][0] #convert the bandpass wavelengths from microns to m and find the index of the last wavelength in the bandpass
             
-        filter_wavelength_array = wavelength_array[lower_index:upper_index]
-        filter_Tput_array = total_throughput_array[lower_index:upper_index]
+        filter_wavelength_array = wavelength_array[lower_index:upper_index] #create an array of the wavelengths in the bandpass
+        filter_throughput_array = total_throughput_array[lower_index:upper_index] #create an array of the total throughput for each wavelength in the bandpass
         
         #Setup the arrays to hold the results
         bandpass_results = SNR_data_per_band () #create a new results object for each bandpass
@@ -151,7 +139,7 @@ def calculate_snr():
         bandpass_results.dBdT_array=np.zeros(temperature_array.size)
         bandpass_results.power_detector_array=np.zeros(temperature_array.size)
         
-        integrated_NEP =(sqrt(detector_area)*100)*sqrt(deltaf)/(Dstar*np.mean(filter_Tput_array))
+        integrated_NEP =(sqrt(detector_area)*100)*sqrt(deltaf)/(Dstar*np.mean(filter_throughput_array))
         integrated_NEP = integrated_NEP/sqrt(TDI_pixels)
         
         # Loop over the temperatures and calculate the SNR for each temperature
@@ -164,7 +152,7 @@ def calculate_snr():
                 deriv_radiance_array[wavelength_index] = calculate_spectral_radiance_derivative(temperature, wavelength)
 
             # Calculate the flux and power at the detector
-            flux_at_detector = radiance_array * filter_Tput_array * det_solid_angle
+            flux_at_detector = radiance_array * filter_throughput_array * det_solid_angle
             power_at_detector = flux_at_detector * detector_area
 
             # Integrate the power and the derivative of the radiance over the bandpass
@@ -201,5 +189,24 @@ def calculate_snr():
     return bandpass_results_array
 
 if __name__ == "__main__":
-    bandpass_results_array = calculate_snr()
+
+    #WAVENUMBER RANGE chosen to give lambda range of 1-300 microns
+    wavenumber_min = 3.33E1
+    wavenumber_max = 1.0E4
+
+    #DETECTOR PARAMETERS
+    Dstar = 1E9                     #This is the broadband D*, assumed constant for the detector. In m Hz^1/2 W^-1
+    TDI_pixels = 16                 #Assume 16 pixel TDI average, actual number depends on number of filters.
+    detector_absorption = 0.95      #Sets absorption value for the detector material. This reduces the effective signal level seen by the detector.
+    det_fnumber = 1.4               #f number of the detector
+    detector_area = (35.0E-6)**2    #area of detector element in m (Detector element size, INO = 35x35 µm )
+    telescope_diameter = 0.05       #LTM 5cm telescope  Diviner =4 cm
+
+    #ORBITAL PARAMETERS
+    orbital_altitude = 100.0E3      #Distance to the target body
+    target_mass = 7.34767309E22     #Mass of the target body in kg
+    target_radius = 1737E3          #radius of target body in m
+
+    bandpass_results_array = calculate_snr(wavenumber_min, wavenumber_max, detector_area, telescope_diameter, detector_absorption, det_fnumber, orbital_altitude, target_mass, target_radius)
+    
     print("Done!")
