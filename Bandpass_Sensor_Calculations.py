@@ -4,11 +4,51 @@
 Original: Created on Thu Aug 28 22:02:53 2014 Tweaked for LTM/TIRI/Icy Moons 3/5/22 @author: bowles """
 
 import numpy as np
+import json
 
 from numpy import exp, sqrt, loadtxt, tan
 from scipy import integrate, constants
 from scipy.constants import h, c, k
 from tqdm import tqdm
+
+class SNR_data_per_band:
+    
+    wavenumber_array = []
+    scene_temperatures_array = []
+    bandpass_array = []
+    temperature_snr = 0.0
+    emissivity_snr = 0.0
+    nedt = 0.0
+    ner = 0.0
+    dBdT = 0.0
+    power_detector = 0.0
+    
+class MissionConfig:
+    def __init__(self, config):
+        self.instrument_name = config["instrument_name"]
+
+        self.wavenumber_min = config["detector_properties"]["wavenumber_min"]
+        self.wavenumber_max = config["detector_properties"]["wavenumber_max"]
+
+        self.spectral_resolution = config["detector_properties"]["spectral_resolution"]
+        self.Dstar = config["detector_properties"]["Dstar"]
+        self.detector_absorption = config["detector_properties"]["detector_absorption"]
+        self.detector_fnumber = config["detector_properties"]["detector_fnumber"]
+        self.detector_side_length = config["detector_properties"]["detector_side_length"]
+        self.telescope_diameter = config["detector_properties"]["telescope_diameter"]
+        self.fov_horizontal_deg = config["detector_properties"]["fov_horizontal_deg"]
+        self.fov_vertical_deg = config["detector_properties"]["fov_vertical_deg"]
+
+        self.latitude_deg = config["orbital_properties"]["latitude_deg"]
+        self.longitude_deg = config["orbital_properties"]["longitude_deg"]
+        self.altitude_m = config["orbital_properties"]["altitude_m"]
+        self.pointing_azimuth_deg = config["orbital_properties"]["pointing_azimuth_deg"]
+        self.pointing_elevation_deg = config["orbital_properties"]["pointing_elevation_deg"]
+        self.roll_deg = config["orbital_properties"]["roll_deg"]
+        self.target_mass_kg = config["orbital_properties"]["target_mass_kg"]
+        self.target_radius_m = config["orbital_properties"]["target_radius_m"]
+
+        self.bandpasses = config['bandpasses']
 
 def calculate_spectral_radiance(temp, wavelength):
     """
@@ -49,15 +89,16 @@ def calculate_spectral_radiance_derivative(temp, wavelength):
 
     return radiance_deriv
     
-def calculate_detector_parameters(det_fnumber, detector_area, telescope_diameter, detector_absorption):
+def calculate_detector_parameters(det_fnumber, detector_side_length, telescope_diameter, detector_absorption):
     half_angle = np.arctan(1.0 / (2 * det_fnumber))
     det_solid_angle = 2.0 * constants.pi * (1 - np.cos(half_angle))
     telescope_area = constants.pi * (telescope_diameter / 2.0) ** 2
+    detector_area = detector_side_length * detector_side_length
     AOmega = detector_area * det_solid_angle
     scene_solid_angle = AOmega / telescope_area
     half_angle = np.arccos(1 - (scene_solid_angle / (2 * constants.pi)))
     total_throughput = 0.8*0.98*0.98*0.98*0.98*0.98*0.98*detector_absorption #estimate of window./filter plus 6 off 98% mirrors. DOES ETM HAVE A WINDOW??
-    return half_angle, det_solid_angle, AOmega, total_throughput
+    return half_angle, det_solid_angle, AOmega, total_throughput, detector_area
 
 def deltaf_calc (orbital_altitude, target_mass, target_radius, Half_angle):
     Orbital_velocity = sqrt ((constants.G*target_mass)/(target_radius+orbital_altitude))
@@ -65,35 +106,26 @@ def deltaf_calc (orbital_altitude, target_mass, target_radius, Half_angle):
     deltaf = Orbital_velocity/Ground_IFOV #Readout frequency in Hz
     return deltaf
 
-class SNR_data_per_band:
-    
-    wavenumber_array = []
-    scene_temperatures_array = []
-    bandpass_array = []
-    temperature_snr = 0.0
-    emissivity_snr = 0.0
-    nedt = 0.0
-    ner = 0.0
-    dBdT = 0.0
-    power_detector = 0.0
-    
-def calculate_snr(wavenumber_min, wavenumber_max, detector_area, telescope_diameter, detector_absorption, det_fnumber, orbital_altitude, target_mass, target_radius, temperature_array, Dstar, TDI_pixels):
+def calculate_snr(mission_config, temperature_array):
     """
     This function calculates the SNR for a given set of parameters. BUG: Cannot currently deal with correct wavenumber input values for ETM. Numbers in main function are chosen to ensure this runs but they are not right. 
     """
 
+    #TDI pixels - this needs to be changed so it takes this input for each bandpass
+    TDI_pixels = 16
+
     #Convert the wavenumber range in cm^-1 to a wavelength range in m
-    lambda1 = 1.0E-2 / wavenumber_max
-    lambda2 = 1.0E-2 / wavenumber_min
+    wavelength_min = 1.0E-2 / mission_config.wavenumber_max
+    wavelength_max = 1.0E-2 / mission_config.wavenumber_min
     
-    wavelength_array = np.arange(lambda1, lambda2, 1.0E-9) #Set the wavelength array with 1nm steps.
+    wavelength_array = np.arange(wavelength_min, wavelength_max, 1.0E-9) #Set the wavelength array with 1nm steps.
     
     #DERIVED DETECTOR PARAMETERS
-    Half_angle, det_solid_angle, AOmega, total_throughput = calculate_detector_parameters(det_fnumber, 
-    detector_area, telescope_diameter, detector_absorption)
+    Half_angle, detector_solid_angle, AOmega, total_throughput, detector_area = calculate_detector_parameters(mission_config.detector_fnumber, 
+    mission_config.detector_side_length, mission_config.telescope_diameter, mission_config.detector_absorption)
     
     #DERIVED ORBITAL PARAMETERS
-    deltaf = deltaf_calc (orbital_altitude, target_mass, target_radius, Half_angle)
+    deltaf = deltaf_calc (mission_config.altitude_m, mission_config.target_mass_kg, mission_config.target_radius_m, Half_angle)
 
     #Setup the arrays to hold the results
     snr = 0.0
@@ -107,7 +139,7 @@ def calculate_snr(wavenumber_min, wavenumber_max, detector_area, telescope_diame
     number_of_bands = len(raw_band_in)                      #determine the number of bands in the file
     
     #Calculate the NEP for the detector
-    noise_eq_power = (sqrt(detector_area)*100.0)*sqrt(deltaf)/Dstar
+    noise_eq_power = (sqrt(detector_area)*100.0)*sqrt(deltaf)/mission_config.Dstar
     noise_eq_power = noise_eq_power/sqrt(TDI_pixels) #This is the NEP per pixel, so we need to scale it for the number of pixels in the TDI.
 
     bandpass_results_array = [] #create an array to hold the results for each bandpass
@@ -134,7 +166,7 @@ def calculate_snr(wavenumber_min, wavenumber_max, detector_area, telescope_diame
         bandpass_results.dBdT = 0.0
         bandpass_results.power_detector = 0.0
         
-        integrated_NEP = (sqrt(detector_area)*100)*sqrt(deltaf)/(Dstar*np.mean(filter_throughput_array))
+        integrated_NEP = (sqrt(detector_area)*100)*sqrt(deltaf)/(mission_config.Dstar*np.mean(filter_throughput_array))
         integrated_NEP = integrated_NEP / sqrt(TDI_pixels)
         integrated_NER = integrated_NEP / AOmega 
 
@@ -152,7 +184,7 @@ def calculate_snr(wavenumber_min, wavenumber_max, detector_area, telescope_diame
                 deriv_radiance_array[wavelength_index] = calculate_spectral_radiance_derivative(temperature, wavelength)
 
             # Calculate the flux and power at the detector
-            flux_at_detector = radiance_array * filter_throughput_array * det_solid_angle
+            flux_at_detector = radiance_array * filter_throughput_array * detector_solid_angle
             power_at_detector = flux_at_detector * detector_area
 
             # Integrate the power and the derivative of the radiance over the bandpass scaling by number of temperatures in fov
@@ -185,25 +217,14 @@ def calculate_snr(wavenumber_min, wavenumber_max, detector_area, telescope_diame
 
     return bandpass_results_array
 
-'''
 if __name__ == "__main__":
 
-    #WAVENUMBER RANGE chosen to give lambda range of 1-300 microns
-    wavenumber_min = 3.33E1
-    wavenumber_max = 1.0E4
+    # Load spacecraft configuration from JSON
+    with open("Nightingale_Configuration.json", "r") as f:
+        config_file = json.load(f)
 
-    #DETECTOR PARAMETERS
-    Dstar = 1E9                     #This is the broadband D*, assumed constant for the detector. In m Hz^1/2 W^-1
-    TDI_pixels = 16                 #Assume 16 pixel TDI average, actual number depends on number of filters.
-    detector_absorption = 0.95      #Sets absorption value for the detector material. This reduces the effective signal level seen by the detector.
-    det_fnumber = 1.4               #f number of the detector
-    detector_area = (35.0E-6)**2    #area of detector element in m (Detector element size, INO = 35x35 µm )
-    telescope_diameter = 0.05       #LTM 5cm telescope  Diviner =4 cm
-
-    #ORBITAL PARAMETERS
-    orbital_altitude = 100.0E3      #Distance to the target body
-    target_mass = 7.34767309E22     #Mass of the target body in kg
-    target_radius = 1737E3          #radius of target body in m
+    # Extract parameters from configuration TO DO: Creat an object to store these parameters and make this a function
+    mission_config = MissionConfig(config_file)
 
     #Load the temperature array from the test tile
     temperatures = np.loadtxt("test_tile.csv", delimiter=',', encoding='utf-8-sig')
@@ -211,7 +232,7 @@ if __name__ == "__main__":
     # Flatten the 2D temperatures array into a 1D array
     temperature_array = temperatures.flatten()
 
-    bandpass_results_array = calculate_snr(wavenumber_min, wavenumber_max, detector_area, telescope_diameter, detector_absorption, det_fnumber, orbital_altitude, target_mass, target_radius, temperature_array, Dstar, TDI_pixels)
+    bandpass_results_array = calculate_snr(mission_config, temperature_array)
     
     #Print the results
     for bandpass_results in bandpass_results_array:
@@ -224,4 +245,3 @@ if __name__ == "__main__":
         print("Power at detector: ", bandpass_results.power_detector)
 
     print("Done!")
-'''

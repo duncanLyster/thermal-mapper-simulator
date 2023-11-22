@@ -1,6 +1,30 @@
-# Space Based Thermal Instrument Digital Twin
-# This code simulates infrared spectral observations for space missions, it was specifically designed for the Nightingale proposal
-# for NASA's New Frontiers (NF5) opportunity. It reads spacecraft configuration from a JSON file and imports a simulated thermal map.
+#!/usr/bin/env python3
+
+''' Space Based Thermal Instrument Digital Twin
+This code simulates infrared spectral observations for space missions, it was specifically designed for the Nightingale proposal
+for NASA's New Frontiers (NF5) opportunity. It reads spacecraft configuration from a JSON file and imports a simulated thermal map.
+
+@author: lyster
+
+Noise calculations are based on the work of Neil Bowles for the Lunar Thermal Mapper (LTM) instrument.
+
+Input Options: You have the choice of input method—either using a 'global map' or a 'tile'. 
+
+Option A: 'Tile' Scene
+- Directly imports temperatures from a .csv file that you have prepared, which could be one of the provided demo files or your own creation.
+- This method is straightforward and efficient for running various scenarios. You can create your .csv manually in Excel or with a more sophisticated script.
+- Accommodates any size of square .csv, ranging from single temperature values to large, realistic FoVs.
+
+Option B: Global Map
+- The script determines which pixels fall within the spacecraft's Field of View (FoV) based on the `configuration.json` file.
+- Facilitates future investigations into full orbital tours, spacecraft movement, and simulated mission observations using a 'scientifically plausible map' of Enceladus.
+- This option involves a more complex workflow and requires the healpix map. There are currently some issues with FoV calculations, and a time component has not yet been incorporated.
+- **Note:** The current example map (as of 6/11/23) is for illustrative purposes only and should not be considered accurate.
+
+Option C: Global Map with Time
+- This option is not yet implemented, but it is the ultimate goal for the project. It will allow for full orbital tours and spacecraft movement, as well as simulated mission observations using a 'scientifically plausible map' of Enceladus.
+
+'''
 
 import json
 import healpy as hp
@@ -12,55 +36,32 @@ import Bandpass_Sensor_Calculations
 from scipy.spatial.transform import Rotation as R
 from scipy.constants import h, c, k
 
-# Load spacecraft configuration from JSON
-with open("Nightingale_Configuration.json", "r") as f:
-    config = json.load(f)
-
-# Set HEALPix resolution
-nside = 2048 # just a default value for now - must be a power of 2
-
-
-class InstrumentConfig:
+class MissionConfig:
     def __init__(self, config):
-        self.fov_deg = config["field_of_view"]["horizontal"]
-        self.altitude = config["spacecraft_state"]["position"]["altitude"]
-        self.lat = config["spacecraft_state"]["position"]["latitude"]
-        self.lon = config["spacecraft_state"]["position"]["longitude"]
-        self.roll_deg = config["spacecraft_state"]["pointing"]["roll"]
-        self.wavenumber_min = config["wavenumber_range"]["min"]
-        self.wavenumber_max = config["wavenumber_range"]["max"]
-        self.spectral_resolution = config["spectral_resolution"]
+        self.instrument_name = config["instrument_name"]
 
-        self.detector_properties = config['detector_properties']
-        self.telescope_properties = config['telescope_properties']
-        self.target_body_properties = config['target_body_properties']
-        self.integration_properties = config['integration_properties']
-        self.absorption = float(config['absorption'])
+        self.wavenumber_min = config["detector_properties"]["wavenumber_min"]
+        self.wavenumber_max = config["detector_properties"]["wavenumber_max"]
 
-        self.wavenumber_range = config['wavenumber_range']
+        self.spectral_resolution = config["detector_properties"]["spectral_resolution"]
+        self.Dstar = config["detector_properties"]["Dstar"]
+        self.detector_absorption = config["detector_properties"]["detector_absorption"]
+        self.detector_fnumber = config["detector_properties"]["detector_fnumber"]
+        self.detector_side_length = config["detector_properties"]["detector_side_length"]
+        self.telescope_diameter = config["detector_properties"]["telescope_diameter"]
+        self.fov_horizontal_deg = config["detector_properties"]["fov_horizontal_deg"]
+        self.fov_vertical_deg = config["detector_properties"]["fov_vertical_deg"]
+
+        self.latitude_deg = config["orbital_properties"]["latitude_deg"]
+        self.longitude_deg = config["orbital_properties"]["longitude_deg"]
+        self.altitude_m = config["orbital_properties"]["altitude_m"]
+        self.pointing_azimuth_deg = config["orbital_properties"]["pointing_azimuth_deg"]
+        self.pointing_elevation_deg = config["orbital_properties"]["pointing_elevation_deg"]
+        self.roll_deg = config["orbital_properties"]["roll_deg"]
+        self.target_mass_kg = config["orbital_properties"]["target_mass_kg"]
+        self.target_radius_m = config["orbital_properties"]["target_radius_m"]
+
         self.bandpasses = config['bandpasses']
-
-# Extract parameters from configuration TO DO: Creat an object to store these parameters and make this a function
-config_parameters = InstrumentConfig(config)
-
-for bandpass in config_parameters.bandpasses:
-    # Convert bandpass from µm to cm^-1
-    lower_in_cm = 1 / (bandpass['lower'] * 1e-4)
-    upper_in_cm = 1 / (bandpass['upper'] * 1e-4)
-
-    if lower_in_cm > config_parameters.wavenumber_range['max'] or upper_in_cm < config_parameters.wavenumber_range['min']:
-        raise ValueError(f"Bandpass {bandpass} in cm^-1: lower {lower_in_cm}, upper {upper_in_cm} is outside the specified wavenumber range.")
-
-# Read and display thermal map from the FITS file
-thermal_map = hp.read_map("fracture_map.fits")
-
-# Display the map with overlaid latitude and longitude lines
-# hp.mollview(thermal_map, title="Thermal Map", unit="Pixel temp (K)", hold=True)    
-# hp.mollview(thermal_map, title="Thermal Map", unit="Pixel temp (K)", norm="hist", cmap="jet", rot=(0, -90, 0), xsize=1600)
-# hp.gnomview(thermal_map, title="Thermal Map", unit="Pixel temp (K)", rot=(0, -90, 0), reso=10, xsize=800, ysize=800, norm="hist", cmap="jet")
-hp.orthview(thermal_map, title="Thermal Map", unit="Pixel temp (K)", rot=(0, -90, 0), half_sky=True, norm="linear", cmap="jet")
-hp.graticule()
-plt.show()
 
 def pixels_in_fov(lat, lon, fov_deg, roll_deg, nside):
     # Identify HEALPix pixels within the spacecraft's field of view (FoV).
@@ -103,12 +104,8 @@ def pixels_in_fov(lat, lon, fov_deg, roll_deg, nside):
     
     return fov_pixels
 
-# Identify pixels within FoV
-pixels = pixels_in_fov(config_parameters.lat, config_parameters.lon, config_parameters.fov_deg, config_parameters.roll_deg, nside)
-
-# FUNCTION 
-# Visualize pixels within the FoV on a new HEALPix map.
 def show_fov_pixels(pixels, nside):
+    # Visualize pixels within the FoV on a new HEALPix map.
     # Initialize a new map with zeros
     fov_map = np.zeros(hp.nside2npix(nside))
     
@@ -123,30 +120,11 @@ def show_fov_pixels(pixels, nside):
     hp.graticule()
     plt.show()
 
-# Show the pixels within the FoV on a new map
-show_fov_pixels(pixels, nside)
-
-# ## Input Options
-# 
-# At this stage, you have the choice of input method—either using a 'global map' or a 'tile'. 
-# 
-# ### Option A: 'Tile' Scene
-# - Directly imports temperatures from a .csv file that you have prepared, which could be one of the provided demo files or your own creation.
-# - This method is straightforward and efficient for running various scenarios. You can create your .csv manually in Excel or with a more sophisticated script.
-# - Accommodates any size of square .csv, ranging from single temperature values to large, realistic FoVs.
-# 
-# ### Option B: Global Map
-# - The script determines which pixels fall within the spacecraft's Field of View (FoV) based on the `configuration.json` file.
-# - Facilitates future investigations into full orbital tours, spacecraft movement, and simulated mission observations using a 'scientifically plausible map' of Enceladus.
-# - This option involves a more complex workflow and requires the healpix map. There are currently some issues with FoV calculations, and a time component has not yet been incorporated.
-# - **Note:** The current example map (as of 6/11/23) is for illustrative purposes only and should not be considered accurate.
-
-
-
-# OPTION A - FUNCTION
-# Import temperatures in 'tile' format - e.g. 10x10 grid FoV prepared separately
-# TO DO: Write function & integrate. Print the map. 
 def import_temperatures(temp_file_path, fov_deg, altitude):
+    # OPTION B
+    # Import temperatures in 'tile' format - e.g. 10x10 grid FoV prepared separately
+    # TO DO: Write function & integrate. Print the map. 
+
     # Read the csv file into a NumPy array, handling BOM if present
     try:
         temperatures = np.loadtxt(temp_file_path, delimiter=',', encoding='utf-8-sig')
@@ -178,10 +156,9 @@ def import_temperatures(temp_file_path, fov_deg, altitude):
     
     return temperatures
 
-
-# OPTION B - FUNCTION
-# Extract temperatures from the thermal map based on pixel indices within the FoV
 def extract_temperatures(pixels, thermal_map):
+    # OPTION B
+    # Extract temperatures from the thermal map based on pixel indices within the FoV
     # Initialize an empty list to store temperatures
     temperatures = []
     
@@ -192,29 +169,15 @@ def extract_temperatures(pixels, thermal_map):
         
     return np.array(temperatures)
 
-# Extract temperatures for the identified pixels OR read in a temperature 'tile' file 
-# OPTION A
-temperatures = import_temperatures("test_tile.csv", config_parameters.fov_deg, config_parameters.altitude)          
-# Print out temperatures within FoV
-print(f"Temperatures within the FoV: {temperatures}")
-
-# OPTION B
-# temperatures = extract_temperatures(pixels, thermal_map)  
-
-
-
-# ### Function: `planck(wavenumber, temperature)`
-# 
-# Calculates blackbody radiance using Planck's Law.
-# 
-# **Equation**:  
-# $ \text{Radiance} = \frac{2 h \nu^3}{c^2} \frac{1}{e^{\frac{h \nu}{k T}} - 1} $
-# 
-# - **Inputs**: `wavenumber` in $ \text{cm}^{-1} $ , `temperature` in K  
-# - **Output**: Radiance in nW $ \text{cm}^{-2} \text{str}^{-1} (\text{cm}^{-1})^{-1} $
-
-
 def planck(wavenumber, temperature):
+    # Calculates blackbody radiance using Planck's Law.
+    # 
+    # **Equation**:  
+    # $ \text{Radiance} = \frac{2 h \nu^3}{c^2} \frac{1}{e^{\frac{h \nu}{k T}} - 1} $
+    # 
+    # - **Inputs**: `wavenumber` in $ \text{cm}^{-1} $ , `temperature` in K  
+    # - **Output**: Radiance in nW $ \text{cm}^{-2} \text{str}^{-1} (\text{cm}^{-1})^{-1} $
+
     # Convert wavenumber to frequency
     wavenumber_si = wavenumber * 100
     frequency = wavenumber_si * c
@@ -228,10 +191,8 @@ def planck(wavenumber, temperature):
     
     return radiance
 
-
-# FUNCTION
-# Calculate composite blackbody curve
 def composite_blackbody_curve(temperatures, wavenumber_min, wavenumber_max, spectral_resolution):
+    # Calculate composite blackbody curve   
     # Initialize wavenumber array based on instrument specs
     wavenumbers = np.arange(wavenumber_min, wavenumber_max + spectral_resolution, spectral_resolution)
     
@@ -245,53 +206,111 @@ def composite_blackbody_curve(temperatures, wavenumber_min, wavenumber_max, spec
     
     return wavenumbers, composite_radiance
 
-# Calculate composite blackbody curve
-wavenumbers, composite_radiance = composite_blackbody_curve(temperatures, config_parameters.wavenumber_min, config_parameters.wavenumber_max, config_parameters.spectral_resolution)
+def global_map_method(config_parameters, nside):
+    # OPTION B
+    # Extract temperatures from the thermal map based on pixel indices within the FoV
+    # Initialize an empty list to store temperatures
 
-# Plot the composite_radiance array
-plt.plot(wavenumbers, composite_radiance)
-plt.xlabel(r'Wavenumber (cm$^{-1}$)')
-plt.ylabel(r'Radiance (nW cm$^{-2}$ str$^{-1}$ (cm$^{-1}$)$^{-1}$)')
-plt.show()
+    # Read and display thermal map from the FITS file
+    thermal_map = hp.read_map("fracture_map.fits")
 
-# Call Bandpass_Sensor_Calculations.py to perform noise calculations NOTE wavenumber_min and wavenumber_max are currently just chosen to function runs (there is a bug)
+    # Display the map with overlaid latitude and longitude lines
+    # hp.mollview(thermal_map, title="Thermal Map", unit="Pixel temp (K)", hold=True)    
+    # hp.mollview(thermal_map, title="Thermal Map", unit="Pixel temp (K)", norm="hist", cmap="jet", rot=(0, -90, 0), xsize=1600)
+    # hp.gnomview(thermal_map, title="Thermal Map", unit="Pixel temp (K)", rot=(0, -90, 0), reso=10, xsize=800, ysize=800, norm="hist", cmap="jet")
 
-#Reload the module to ensure changes are picked up
-importlib.reload(Bandpass_Sensor_Calculations)
+    # Best view for Nightingale
+    hp.orthview(thermal_map, title="Thermal Map", unit="Pixel temp (K)", rot=(0, -90, 0), half_sky=True, norm="linear", cmap="jet")
+    hp.graticule()
+    plt.show()
 
-#WAVENUMBER RANGE chosen to give lambda range of 1-300 microns
-wavenumber_min = 3.33E1
-wavenumber_max = 1.0E4
+    # Identify pixels within FoV
+    pixels = pixels_in_fov(config_parameters.lat, config_parameters.lon, config_parameters.fov_deg, config_parameters.roll_deg, nside)
 
-#DETECTOR PARAMETERS
-Dstar = 1E9                     #This is the broadband D*, assumed constant for the detector. In m Hz^1/2 W^-1
-TDI_pixels = 16                 #Assume 16 pixel TDI average, actual number depends on number of filters.
-detector_absorption = 0.95      #Sets absorption value for the detector material. This reduces the effective signal level seen by the detector.
-det_fnumber = 1.4               #f number of the detector
-detector_area = (35.0E-6)**2    #area of detector element in m (Detector element size, INO = 35x35 µm )
-telescope_diameter = 0.05       #LTM 5cm telescope  Diviner =4 cm
+    # Show the pixels within the FoV on a new map
+    show_fov_pixels(pixels, nside)
 
-#ORBITAL PARAMETERS
-orbital_altitude = 100.0E3      #Distance to the target body
-target_mass = 7.34767309E22     #Mass of the target body in kg
-target_radius = 1737E3          #radius of target body in m
+    temperatures = extract_temperatures(pixels, thermal_map)    
 
-#Load the temperature array from the test tile
-temperatures = np.loadtxt("test_tile.csv", delimiter=',', encoding='utf-8-sig')
+    return temperatures
 
-# Flatten the 2D temperatures array into a 1D array
-temperature_array = temperatures.flatten()
+def main(): 
+    # Load spacecraft configuration from JSON
+    with open("Nightingale_Configuration.json", "r") as f:
+        config_file = json.load(f)
 
-bandpass_results_array: list = Bandpass_Sensor_Calculations.calculate_snr(wavenumber_min, wavenumber_max, detector_area, telescope_diameter, detector_absorption, det_fnumber, orbital_altitude, target_mass, target_radius, temperature_array, Dstar, TDI_pixels)
-    
-#Print the results
-for bandpass_results in bandpass_results_array:
-    print("Bandpass: ", bandpass_results.bandpass_array)
-    print("Temperature SNR: ", bandpass_results.temperature_snr)
-    print("Emissivity SNR: ", bandpass_results.emissivity_snr)
-    print("NEDT: ", bandpass_results.nedt)
-    print("NER: ", bandpass_results.ner)
-    print("dB/dT: ", bandpass_results.dBdT)
-    print("Power at detector: ", bandpass_results.power_detector)
+    # Extract parameters from configuration TO DO: Creat an object to store these parameters and make this a function
+    mission_config = MissionConfig(config_file)
 
+    for bandpass in mission_config.bandpasses:
+        # Convert bandpass from µm to cm^-1
+        lower_in_cm = 1 / (bandpass['lower'] * 1e-4)
+        upper_in_cm = 1 / (bandpass['upper'] * 1e-4)
 
+        if lower_in_cm > mission_config.wavenumber_max or upper_in_cm < mission_config.wavenumber_min:
+            raise ValueError(f"Bandpass {bandpass} in cm^-1: lower {lower_in_cm}, upper {upper_in_cm} is outside the specified wavenumber range.")
+
+    # Extract temperatures for the identified pixels OR read in a temperature 'tile' file 
+    # OPTION A
+    temperatures = import_temperatures("test_tile.csv", mission_config.fov_horizontal_deg, mission_config.altitude_m)  
+
+    # Option B: Global Map
+    #temperatures = global_map_method(config_parameters, nside = 2048) #nside is the resolution of the healpix map - must be a power of 2
+        
+    # Print out temperatures within FoV
+    print(f"Temperatures within the FoV: {temperatures}")
+
+    # Calculate composite blackbody curve
+    wavenumbers, composite_radiance = composite_blackbody_curve(temperatures, mission_config.wavenumber_min, mission_config.wavenumber_max, mission_config.spectral_resolution)
+
+    # Plot the composite_radiance array
+    plt.plot(wavenumbers, composite_radiance)
+    plt.xlabel(r'Wavenumber (cm$^{-1}$)')
+    plt.ylabel(r'Radiance (nW cm$^{-2}$ str$^{-1}$ (cm$^{-1}$)$^{-1}$)')
+    plt.show()
+
+    # Call Bandpass_Sensor_Calculations.py to perform noise calculations NOTE wavenumber_min and wavenumber_max are currently just chosen to function runs (there is a bug)
+
+    #Reload the module to ensure changes are picked up
+    importlib.reload(Bandpass_Sensor_Calculations)
+
+    TDI_pixels = 16                 #Assume 16 pixel TDI average, actual number depends on number of filters. NEED TO UPDATE THIS TO USE VALUE FOR EACH BANDPASS
+
+    #WAVENUMBER RANGE chosen to give lambda range of 1-300 microns
+    wavenumber_min = 3.33E1
+    wavenumber_max = 1.0E4
+
+    #DETECTOR PARAMETERS
+    Dstar = mission_config.Dstar #1E9    #This is the broadband D*, assumed constant for the detector. In m Hz^1/2 W^-1
+    detector_absorption = mission_config.detector_absorption   #0.95      #Sets absorption value for the detector material. This reduces the effective signal level seen by the detector.
+    detector_fnumber = mission_config.detector_fnumber #1.4               #f number of the detector
+    detector_side_length = mission_config.detector_side_length #35.0E-6  #Detector element size, INO = 35x35 µm
+    #detector_area = detector_side_length**2    #area of detector element in m (Detector element size, INO = 35x35 µm )
+    telescope_diameter = mission_config.telescope_diameter #0.05       #LTM 5cm telescope  Diviner =4 cm
+
+    #ORBITAL PARAMETERS
+    altitude_m = mission_config.altitude_m #100.0E3      #Distance to the target body
+    target_mass_kg = mission_config.target_mass_kg #7.34767309E22     #Mass of the target body in kg
+    target_radius = mission_config.target_radius_m #1737E3          #radius of target body in m
+
+    #Load the temperature array from the test tile
+    temperatures = np.loadtxt("test_tile.csv", delimiter=',', encoding='utf-8-sig')
+
+    # Flatten the 2D temperatures array into a 1D array
+    temperature_array = temperatures.flatten()
+
+    # bandpass_results_array: list = Bandpass_Sensor_Calculations.calculate_snr(wavenumber_min, wavenumber_max, detector_side_length, telescope_diameter, detector_absorption, detector_fnumber, altitude_m, target_mass_kg, target_radius, temperature_array, Dstar, TDI_pixels)
+    bandpass_results_array: list = Bandpass_Sensor_Calculations.calculate_snr(mission_config, temperature_array)
+        
+    #Print the results
+    for bandpass_results in bandpass_results_array:
+        print("Bandpass: ", bandpass_results.bandpass_array)
+        print("Temperature SNR: ", bandpass_results.temperature_snr)
+        print("Emissivity SNR: ", bandpass_results.emissivity_snr)
+        print("NEDT: ", bandpass_results.nedt)
+        print("NER: ", bandpass_results.ner)
+        print("dB/dT: ", bandpass_results.dBdT)
+        print("Power at detector: ", bandpass_results.power_detector)
+
+if __name__ == "__main__":
+    main()
