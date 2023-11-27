@@ -148,11 +148,11 @@ def import_temperatures(temp_file_path, fov_deg, altitude):
     pixel_size_rounded = np.round(pixel_size, -int(np.floor(np.log10(abs(pixel_size))))+2)
 
     # Display the temperatures as a heatmap
-    plt.imshow(temperatures.reshape(-1, int(num_pixels_one_side)), cmap='hot', interpolation='nearest')
-    plt.colorbar(label='Temperature (K)')
-    plt.title('Tile Map')
-    plt.xlabel(f'Pixel size ~ {pixel_size_rounded} m, FoV size ~ {fov_width_rounded} m x {fov_width_rounded} m')
-    plt.show()
+    # plt.imshow(temperatures.reshape(-1, int(num_pixels_one_side)), cmap='hot', interpolation='nearest')
+    # plt.colorbar(label='Temperature (K)')
+    # plt.title('Tile Map')
+    # plt.xlabel(f'Pixel size ~ {pixel_size_rounded} m, FoV size ~ {fov_width_rounded} m x {fov_width_rounded} m')
+    # plt.show()
     
     return temperatures
 
@@ -234,6 +234,34 @@ def global_map_method(config_parameters, nside):
 
     return temperatures
 
+def plot_blackbody_curves_NEDT(wavenumbers, composite_radiance, bandpass_results_array, mission_config):
+    # Plot the composite blackbody curve with bar chart plot overlaid for bandpasses where NER is the error bar
+    # Box width is defined by bandpass width and error bar size is defined by NER. The top of each box aligns with the composite blackbody curve.
+    
+    # Plot the composite blackbody curve
+    plt.plot(wavenumbers, composite_radiance, label='Composite Blackbody Curve')
+
+    # Plot error bars for each bandpass
+    for i, bandpass in enumerate(mission_config.bandpasses):
+        # Convert bandpass from µm to cm^-1
+        upper_in_cm = 1 / (bandpass['lower'] * 1e-4)
+        lower_in_cm = 1 / (bandpass['upper'] * 1e-4) 
+
+        bandpass_center = lower_in_cm + (upper_in_cm - lower_in_cm) / 2
+
+        # Find radiance value in composite_radiance that corresponds to bandpass center based on nearest number in wavenumbers having matching index
+        wavenumber_index = int((bandpass_center - mission_config.wavenumber_min) / (mission_config.wavenumber_max - mission_config.wavenumber_min) * len(wavenumbers))
+
+        NER = bandpass_center / bandpass_results_array[i].temperature_snr
+
+        plt.bar(bandpass_center, composite_radiance[wavenumber_index], width=upper_in_cm - lower_in_cm, align='center', alpha=0.5, label="Bandpass " + str(bandpass['lower']) + "-" + str(bandpass['upper']) + " $\mu$m")
+        plt.errorbar(bandpass_center, composite_radiance[wavenumber_index], NER)
+
+    plt.xlabel('Wavenumber (cm$^{-1}$)')
+    plt.ylabel('Radiance (nW cm$^{-2}$ sr$^{-1}$ (cm$^{-1}$)$^{-1}$)')
+    plt.legend()
+    plt.show()
+
 def main(): 
     # Load spacecraft configuration from JSON
     with open("Nightingale_Configuration.json", "r") as f:
@@ -258,40 +286,21 @@ def main():
     #temperatures = global_map_method(config_parameters, nside = 2048) #nside is the resolution of the healpix map - must be a power of 2
         
     # Print out temperatures within FoV
-    print(f"Temperatures within the FoV: {temperatures}")
+    # print(f"Temperatures within the FoV: {temperatures}")
 
     # Calculate composite blackbody curve
     wavenumbers, composite_radiance = composite_blackbody_curve(temperatures, mission_config.wavenumber_min, mission_config.wavenumber_max, mission_config.spectral_resolution)
 
     # Plot the composite_radiance array
-    plt.plot(wavenumbers, composite_radiance)
-    plt.xlabel(r'Wavenumber (cm$^{-1}$)')
-    plt.ylabel(r'Radiance (nW cm$^{-2}$ str$^{-1}$ (cm$^{-1}$)$^{-1}$)')
-    plt.show()
+    # plt.plot(wavenumbers, composite_radiance)
+    # plt.xlabel(r'Wavenumber (cm$^{-1}$)')
+    # plt.ylabel(r'Radiance (nW cm$^{-2}$ str$^{-1}$ (cm$^{-1}$)$^{-1}$)')
+    # plt.show()
 
     # Call Bandpass_Sensor_Calculations.py to perform noise calculations NOTE wavenumber_min and wavenumber_max are currently just chosen to function runs (there is a bug)
 
     #Reload the module to ensure changes are picked up
     importlib.reload(Bandpass_Sensor_Calculations)
-
-    TDI_pixels = 16                 #Assume 16 pixel TDI average, actual number depends on number of filters. NEED TO UPDATE THIS TO USE VALUE FOR EACH BANDPASS
-
-    #WAVENUMBER RANGE chosen to give lambda range of 1-300 microns
-    wavenumber_min = 3.33E1
-    wavenumber_max = 1.0E4
-
-    #DETECTOR PARAMETERS
-    Dstar = mission_config.Dstar #1E9    #This is the broadband D*, assumed constant for the detector. In m Hz^1/2 W^-1
-    detector_absorption = mission_config.detector_absorption   #0.95      #Sets absorption value for the detector material. This reduces the effective signal level seen by the detector.
-    detector_fnumber = mission_config.detector_fnumber #1.4               #f number of the detector
-    detector_side_length = mission_config.detector_side_length #35.0E-6  #Detector element size, INO = 35x35 µm
-    #detector_area = detector_side_length**2    #area of detector element in m (Detector element size, INO = 35x35 µm )
-    telescope_diameter = mission_config.telescope_diameter #0.05       #LTM 5cm telescope  Diviner =4 cm
-
-    #ORBITAL PARAMETERS
-    altitude_m = mission_config.altitude_m #100.0E3      #Distance to the target body
-    target_mass_kg = mission_config.target_mass_kg #7.34767309E22     #Mass of the target body in kg
-    target_radius = mission_config.target_radius_m #1737E3          #radius of target body in m
 
     #Load the temperature array from the test tile
     temperatures = np.loadtxt("test_tile.csv", delimiter=',', encoding='utf-8-sig')
@@ -301,6 +310,8 @@ def main():
 
     # bandpass_results_array: list = Bandpass_Sensor_Calculations.calculate_snr(wavenumber_min, wavenumber_max, detector_side_length, telescope_diameter, detector_absorption, detector_fnumber, altitude_m, target_mass_kg, target_radius, temperature_array, Dstar, TDI_pixels)
     bandpass_results_array: list = Bandpass_Sensor_Calculations.calculate_snr(mission_config, temperature_array)
+
+    plot_blackbody_curves_NEDT(wavenumbers, composite_radiance, bandpass_results_array, mission_config)
         
     #Print the results
     for bandpass_results in bandpass_results_array:

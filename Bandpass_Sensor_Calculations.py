@@ -168,7 +168,7 @@ def calculate_snr(mission_config, temperature_array):
         
         integrated_NEP = (sqrt(detector_area)*100)*sqrt(deltaf)/(mission_config.Dstar*np.mean(filter_throughput_array))
         integrated_NEP = integrated_NEP / sqrt(TDI_pixels)
-        integrated_NER = integrated_NEP / AOmega 
+        integrated_NER = integrated_NEP / AOmega # This is how it was calculated in Neil's code, but his slides say it should be radiance divided by SNR instead.
 
         # Initialize accumulators
         total_power_at_detector = 0.0
