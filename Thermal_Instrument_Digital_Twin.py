@@ -234,7 +234,7 @@ def global_map_method(config_parameters, nside):
 
     return temperatures
 
-def plot_blackbody_curves_NEDT(wavenumbers, composite_radiance, bandpass_results_array, mission_config):
+def plot_blackbody_curves_NER(wavenumbers, composite_radiance, bandpass_results_array, mission_config):
     # Plot the composite blackbody curve with bar chart plot overlaid for bandpasses where NER is the error bar
     # Box width is defined by bandpass width and error bar size is defined by NER. The top of each box aligns with the composite blackbody curve.
     
@@ -252,7 +252,7 @@ def plot_blackbody_curves_NEDT(wavenumbers, composite_radiance, bandpass_results
         # Find radiance value in composite_radiance that corresponds to bandpass center based on nearest number in wavenumbers having matching index
         wavenumber_index = int((bandpass_center - mission_config.wavenumber_min) / (mission_config.wavenumber_max - mission_config.wavenumber_min) * len(wavenumbers))
 
-        NER = bandpass_center / bandpass_results_array[i].temperature_snr
+        NER = composite_radiance[wavenumber_index] / bandpass_results_array[i].temperature_snr
 
         plt.bar(bandpass_center, composite_radiance[wavenumber_index], width=upper_in_cm - lower_in_cm, align='center', alpha=0.5, label="Bandpass " + str(bandpass['lower']) + "-" + str(bandpass['upper']) + " $\mu$m")
         plt.errorbar(bandpass_center, composite_radiance[wavenumber_index], NER)
@@ -263,6 +263,9 @@ def plot_blackbody_curves_NEDT(wavenumbers, composite_radiance, bandpass_results
     plt.show()
 
 def main(): 
+    #Reload the module to ensure changes are picked up
+    importlib.reload(Bandpass_Sensor_Calculations)
+
     # Load spacecraft configuration from JSON
     with open("Nightingale_Configuration.json", "r") as f:
         config_file = json.load(f)
@@ -299,9 +302,6 @@ def main():
 
     # Call Bandpass_Sensor_Calculations.py to perform noise calculations NOTE wavenumber_min and wavenumber_max are currently just chosen to function runs (there is a bug)
 
-    #Reload the module to ensure changes are picked up
-    importlib.reload(Bandpass_Sensor_Calculations)
-
     #Load the temperature array from the test tile
     temperatures = np.loadtxt("test_tile.csv", delimiter=',', encoding='utf-8-sig')
 
@@ -311,7 +311,7 @@ def main():
     # bandpass_results_array: list = Bandpass_Sensor_Calculations.calculate_snr(wavenumber_min, wavenumber_max, detector_side_length, telescope_diameter, detector_absorption, detector_fnumber, altitude_m, target_mass_kg, target_radius, temperature_array, Dstar, TDI_pixels)
     bandpass_results_array: list = Bandpass_Sensor_Calculations.calculate_snr(mission_config, temperature_array)
 
-    plot_blackbody_curves_NEDT(wavenumbers, composite_radiance, bandpass_results_array, mission_config)
+    plot_blackbody_curves_NER(wavenumbers, composite_radiance, bandpass_results_array, mission_config)
         
     #Print the results
     for bandpass_results in bandpass_results_array:
