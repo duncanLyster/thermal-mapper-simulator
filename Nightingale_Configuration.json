@@ -1,8 +1,8 @@
 {
   "instrument_name": "Nightingale_Spectrometer",
   "detector_properties": {
-    "wavenumber_min": 3.33E1,
-    "wavenumber_max": 1.0E4,
+    "wavenumber_min": 33.3,
+    "wavenumber_max": 1500,
     "wavenumber_unit": "cm^-1",
     "spectral_resolution": 0.1,
     "Dstar": 1E9,
@@ -32,6 +32,6 @@
       {"lower": 100.0, "upper": 150.0, "TDI_pixels": 16},
       {"lower": 150.0, "upper": 200.0, "TDI_pixels": 16},
       {"lower": 50.0, "upper": 100.0, "TDI_pixels": 16},
-      {"lower": 100.0, "upper": 200.0, "TDI_pixels": 16}
+      {"lower": 100.0, "upper": 200.0, "TDI_pixels": 144}
   ]
 }

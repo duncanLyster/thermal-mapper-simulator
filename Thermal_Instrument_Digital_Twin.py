@@ -253,12 +253,13 @@ def plot_blackbody_curves_NER(wavenumbers, composite_radiance, bandpass_results_
         wavenumber_index = int((bandpass_center - mission_config.wavenumber_min) / (mission_config.wavenumber_max - mission_config.wavenumber_min) * len(wavenumbers))
 
         NER = composite_radiance[wavenumber_index] / bandpass_results_array[i].temperature_snr
-
-        plt.bar(bandpass_center, composite_radiance[wavenumber_index], width=upper_in_cm - lower_in_cm, align='center', alpha=0.5, label="Bandpass " + str(bandpass['lower']) + "-" + str(bandpass['upper']) + " $\mu$m")
+    
+        plt.bar(bandpass_center, composite_radiance[wavenumber_index], width=upper_in_cm - lower_in_cm, align='center', alpha=0.5, label="Bandpass " + str(bandpass['lower']) + "-" + str(bandpass['upper']) + " $\mu$m | NEDT: " + str(round(bandpass_results_array[i].nedt, 1)) + " K")
         plt.errorbar(bandpass_center, composite_radiance[wavenumber_index], NER)
 
     plt.xlabel('Wavenumber (cm$^{-1}$)')
     plt.ylabel('Radiance (nW cm$^{-2}$ sr$^{-1}$ (cm$^{-1}$)$^{-1}$)')
+    plt.yscale('log') 
     plt.legend()
     plt.show()
 
@@ -270,37 +271,28 @@ def main():
     with open("Nightingale_Configuration.json", "r") as f:
         config_file = json.load(f)
 
-    # Extract parameters from configuration TO DO: Creat an object to store these parameters and make this a function
+    # Extract parameters from configuration 
     mission_config = MissionConfig(config_file)
 
+    # Check that the bandpasses are within the specified wavenumber range
     for bandpass in mission_config.bandpasses:
         # Convert bandpass from µm to cm^-1
         lower_in_cm = 1 / (bandpass['lower'] * 1e-4)
         upper_in_cm = 1 / (bandpass['upper'] * 1e-4)
-
         if lower_in_cm > mission_config.wavenumber_max or upper_in_cm < mission_config.wavenumber_min:
             raise ValueError(f"Bandpass {bandpass} in cm^-1: lower {lower_in_cm}, upper {upper_in_cm} is outside the specified wavenumber range.")
 
     # Extract temperatures for the identified pixels OR read in a temperature 'tile' file 
     # OPTION A
-    temperatures = import_temperatures("test_tile.csv", mission_config.fov_horizontal_deg, mission_config.altitude_m)  
+    # temperatures = import_temperatures("test_tile.csv", mission_config.fov_horizontal_deg, mission_config.altitude_m)  
+
+    temperatures = [45]
 
     # Option B: Global Map
     #temperatures = global_map_method(config_parameters, nside = 2048) #nside is the resolution of the healpix map - must be a power of 2
-        
-    # Print out temperatures within FoV
-    # print(f"Temperatures within the FoV: {temperatures}")
 
     # Calculate composite blackbody curve
     wavenumbers, composite_radiance = composite_blackbody_curve(temperatures, mission_config.wavenumber_min, mission_config.wavenumber_max, mission_config.spectral_resolution)
-
-    # Plot the composite_radiance array
-    # plt.plot(wavenumbers, composite_radiance)
-    # plt.xlabel(r'Wavenumber (cm$^{-1}$)')
-    # plt.ylabel(r'Radiance (nW cm$^{-2}$ str$^{-1}$ (cm$^{-1}$)$^{-1}$)')
-    # plt.show()
-
-    # Call Bandpass_Sensor_Calculations.py to perform noise calculations NOTE wavenumber_min and wavenumber_max are currently just chosen to function runs (there is a bug)
 
     #Load the temperature array from the test tile
     temperatures = np.loadtxt("test_tile.csv", delimiter=',', encoding='utf-8-sig')
@@ -308,20 +300,20 @@ def main():
     # Flatten the 2D temperatures array into a 1D array
     temperature_array = temperatures.flatten()
 
-    # bandpass_results_array: list = Bandpass_Sensor_Calculations.calculate_snr(wavenumber_min, wavenumber_max, detector_side_length, telescope_diameter, detector_absorption, detector_fnumber, altitude_m, target_mass_kg, target_radius, temperature_array, Dstar, TDI_pixels)
+    # Call Bandpass_Sensor_Calculations.py to perform noise calculations
     bandpass_results_array: list = Bandpass_Sensor_Calculations.calculate_snr(mission_config, temperature_array)
-
-    plot_blackbody_curves_NER(wavenumbers, composite_radiance, bandpass_results_array, mission_config)
         
     #Print the results
     for bandpass_results in bandpass_results_array:
         print("Bandpass: ", bandpass_results.bandpass_array)
         print("Temperature SNR: ", bandpass_results.temperature_snr)
-        print("Emissivity SNR: ", bandpass_results.emissivity_snr)
-        print("NEDT: ", bandpass_results.nedt)
         print("NER: ", bandpass_results.ner)
-        print("dB/dT: ", bandpass_results.dBdT)
-        print("Power at detector: ", bandpass_results.power_detector)
+        print("NEDT: ", bandpass_results.nedt)
+        #print("Emissivity SNR: ", bandpass_results.emissivity_snr)
+        #print("dB/dT: ", bandpass_results.dBdT)
+        #print("Power at detector: ", bandpass_results.power_detector)
+
+    plot_blackbody_curves_NER(wavenumbers, composite_radiance, bandpass_results_array, mission_config)
 
 if __name__ == "__main__":
     main()

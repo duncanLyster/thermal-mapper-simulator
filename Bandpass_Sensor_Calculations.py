@@ -110,10 +110,6 @@ def calculate_snr(mission_config, temperature_array):
     """
     This function calculates the SNR for a given set of parameters. BUG: Cannot currently deal with correct wavenumber input values for ETM. Numbers in main function are chosen to ensure this runs but they are not right. 
     """
-
-    #TDI pixels - this needs to be changed so it takes this input for each bandpass
-    TDI_pixels = 16
-
     #Convert the wavenumber range in cm^-1 to a wavelength range in m
     wavelength_min = 1.0E-2 / mission_config.wavenumber_max
     wavelength_max = 1.0E-2 / mission_config.wavenumber_min
@@ -134,19 +130,19 @@ def calculate_snr(mission_config, temperature_array):
     integrated_power_at_detector = 0.0
    
     #Load the bandpass file
-    bandpass_file = "nightingale_bandpass.txt"              #This is the bandpass file for the Nightingale mission
-    raw_band_in=loadtxt(bandpass_file,delimiter=',')        #load the bandpass file
-    number_of_bands = len(raw_band_in)                      #determine the number of bands in the file
-    
-    #Calculate the NEP for the detector
-    noise_eq_power = (sqrt(detector_area)*100.0)*sqrt(deltaf)/mission_config.Dstar
-    noise_eq_power = noise_eq_power/sqrt(TDI_pixels) #This is the NEP per pixel, so we need to scale it for the number of pixels in the TDI.
+    raw_band_in = [[bp['lower'], bp['upper']] for bp in mission_config.bandpasses]
+    TDI_pixels_list = [bp['TDI_pixels'] for bp in mission_config.bandpasses]
+    number_of_bands = len(raw_band_in)        #determine the number of bands in the file
+
+    #Calculate the NEP per pixel for the detector
+    noise_eq_power_per_pix = (sqrt(detector_area)*100.0)*sqrt(deltaf)/mission_config.Dstar
 
     bandpass_results_array = [] #create an array to hold the results for each bandpass
     total_throughput_array = np.full(wavelength_array.size, total_throughput) #create an array of the total throughput for each wavelength
     
     #Loop over the bandpasses and calculate the SNR for each bandpass
     for band_number in tqdm(range(number_of_bands), desc="Calculating SNR for each bandpass"):
+        noise_eq_power_filter = noise_eq_power_per_pix/sqrt(TDI_pixels_list[band_number]) #This is the NEP per pixel, so we need to scale it for the number of pixels in the TDI for the whole filter
         bandpass_array = raw_band_in[band_number]
         
         lower_index=np.where(wavelength_array>bandpass_array[0]*1E-6)[0][0] #convert the bandpass wavelengths from microns to m and find the index of the first wavelength in the bandpass
@@ -167,7 +163,7 @@ def calculate_snr(mission_config, temperature_array):
         bandpass_results.power_detector = 0.0
         
         integrated_NEP = (sqrt(detector_area)*100)*sqrt(deltaf)/(mission_config.Dstar*np.mean(filter_throughput_array))
-        integrated_NEP = integrated_NEP / sqrt(TDI_pixels)
+        integrated_NEP = integrated_NEP / sqrt(TDI_pixels_list[band_number])
         integrated_NER = integrated_NEP / AOmega # This is how it was calculated in Neil's code, but his slides say it should be radiance divided by SNR instead.
 
         # Initialize accumulators
@@ -195,8 +191,8 @@ def calculate_snr(mission_config, temperature_array):
             total_deriv_radiance += integrated_deriv_radiance
 
         # Calculate the SNR for the detector
-        snr = total_power_at_detector / noise_eq_power
-        snr_delta_power = (total_power_at_detector - (0.99 * total_power_at_detector)) / noise_eq_power #This is the SNR for a 1% change in emissivity
+        snr = total_power_at_detector / noise_eq_power_filter
+        snr_delta_power = (total_power_at_detector - (0.99 * total_power_at_detector)) / noise_eq_power_filter #This is the SNR for a 1% change in emissivity
 
         # Calculate the NEDT for the detector
         noise_eq_delta_T = integrated_NER / total_deriv_radiance
